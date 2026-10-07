@@ -174,7 +174,10 @@ def run_live(args) -> int:
                 now = time.time()
                 if rec.dec.header is None and now - header_asked > 2.0:
                     header_asked = now
-                    ser.write(P.CMD_SEND_HEADER)
+                    try:
+                        ser.write(P.CMD_SEND_HEADER)
+                    except serial.SerialException:
+                        pass  # the read path handles the disconnect
                     print(f"\n[no session header yet; {rec.dec.parser.stats.frames} frames, "
                           f"{rec.dec.stats.frames_before_header} data frames waiting] requested again", flush=True)
 

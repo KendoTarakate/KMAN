@@ -389,7 +389,6 @@ def main(argv=None) -> int:
             if k != "label":
                 pl.setXLink(plots["label"])
 
-    t_start = time.monotonic()
     rate_hist: list[tuple[float, int]] = []
 
     def tick() -> None:

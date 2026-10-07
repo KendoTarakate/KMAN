@@ -62,7 +62,7 @@ const size_t kDataHeaderLen = 4 + 2 + 1;  // t_us, seq, valid
 uint8_t g_dataBody[kDataHeaderLen + 2 * kMaxChannels];
 uint8_t g_frame[proto::kOverhead + kDataHeaderLen + 2 * kMaxChannels + proto::kStatusBodyLen];
 
-char g_headerJson[4000];  // ~1.3 KB with chest+flex, ~3.2 KB with all four slots
+char g_headerJson[4000];  // ~1.7 KB with chest+flex, ~3.1 KB with three IMUs + flex
 uint8_t g_headerFrame[sizeof g_headerJson + proto::kOverhead];
 
 ByteRing<KMAN_TX_RING_BYTES> g_tx;
