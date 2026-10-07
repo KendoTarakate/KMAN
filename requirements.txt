@@ -1,0 +1,10 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+pyarrow>=14
+pyserial>=3.5
+matplotlib>=3.7
+pyyaml>=6.0
+pyqtgraph>=0.13.3
+PySide6>=6.5      # Qt binding for pyqtgraph (PyQt6/PyQt5 also work)
+pytest>=7
