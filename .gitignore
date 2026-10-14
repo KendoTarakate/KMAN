@@ -1,0 +1,19 @@
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+build/
+# Recorded data: keep only the small sample and the README
+data/*
+!data/README.md
+!data/sample_*
+# Reports
+reports/
+*.png
+!docs/*.png

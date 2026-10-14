@@ -1,0 +1,62 @@
+# KMAN Step 1 analysis configuration. Every threshold the analysis uses lives
+# here. report.py --config my.yaml deep-merges a partial file over this one.
+# Units are in the key names. Defaults were tuned on the simulator; re-tune on
+# real recordings (calibration-relative thresholds should transfer best).
+
+preprocess:
+  max_interp_gap_s: 0.5        # lost-frame gaps up to this are linearly interpolated;
+                               # longer gaps are interpolated too (to keep filters stable)
+                               # but masked: no breaths/events are reported inside them
+
+calibration:
+  label: 1                     # quiet reference segment(s): 1 = rest breathing
+  fallback_first_s: 30         # used when the session has no such label
+  max_s: 120                   # use at most this much of the calibration label
+
+breathing:
+  gyro_bias_s: 10              # gyro bias = median over the first N s of calibration
+  comp_filter_tau_s: 1.0       # complementary filter: gyro above ~1/(2*pi*tau) Hz, accel below
+  resp_fs_hz: 20               # respiration processing rate (decimated from the frame rate)
+  band_hz: [0.05, 1.0]         # zero-phase Butterworth band-pass (filtfilt)
+  filter_order: 2              # per pass; filtfilt doubles the effective order
+  pca_window_s: 30             # windowed PCA -> 1-D waveform (50 % overlap, Hann overlap-add)
+  peaks:
+    min_interval_s: 1.5        # max 40 breaths/min
+    rel_prominence: 0.3        # min prominence = rel * reference peak-to-peak amplitude ...
+    abs_min_prominence_deg: 0.08   # ... but never below this (noise/cardiac floor)
+    ref_window_s: 60           # reference amplitude: rolling quantile of |waveform|
+    ref_quantile: 0.8
+  max_rate_interval_s: 15      # breath intervals longer than this produce no rate value
+
+motion:
+  highpass_hz: 1.5             # spec: energy above 1.5 Hz
+  window_s: 2.0                # sliding RMS window (centred)
+  threshold_mg: 15.0           # chest accel RMS above this = motion artifact
+
+phase:                         # only used when an abdomen IMU is present
+  window_s: 10                 # sliding circular mean of the Hilbert phase difference
+  min_amplitude_frac: 0.25     # both envelopes must exceed this x their calibration median
+  min_coherence: 0.5           # resultant length of the windowed phase difference
+  paradox_deg: 120             # |chest - abdomen| above this = paradoxical effort
+
+swallow:
+  baseline_window_s: 10        # long moving median removes drift
+  polarity: abs                # abs | positive | negative deflections count as events
+  k_on: 5.0                    # event starts when deviation > k_on  * sigma_cal
+  k_off: 2.0                   # event ends   when deviation < k_off * sigma_cal
+  sigma_floor_counts: 2.0      # lower bound on sigma_cal (avoid zero on a quiet channel)
+  min_duration_s: 0.3          # shorter = spike, discarded
+  max_duration_s: 2.5          # longer = sustained bend (head posture), not a swallow
+  merge_gap_s: 0.2             # events closer than this are merged
+  head_amplitude_k: 25.0       # peak deviation above this x sigma_cal = head movement
+  rate_window_s: 10            # spec: events per 10 s
+  head_imu:                    # only used when a neck IMU is present
+    tilt_change_deg: 8.0       # head tilt (gravity direction) change during the event
+    yaw_change_deg: 10.0       # rotation about vertical (needs neck gyro)
+    margin_s: 0.5              # examine [start - margin, end + margin]
+
+report:
+  width_in: 18
+  panel_height_in: 1.9
+  dpi: 110
+  band_alpha: 0.16

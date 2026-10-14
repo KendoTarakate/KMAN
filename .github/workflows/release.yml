@@ -1,0 +1,75 @@
+# Publish a GitHub Release with the firmware images (one .uf2 + .hex per sensor
+# variant) and the CHANGELOG section as notes. Either push a tag like v1.0.0, or
+# run this workflow from the Actions tab with a version: it then creates the tag
+# on the selected branch's latest commit.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 (creates tag v<version>)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches firmware and package versions
+        run: |
+          tag="${TAG#v}"
+          fw=$(sed -n 's/^#define KMAN_FW_VERSION "\(.*\)"/\1/p' firmware/include/config.h)
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          host=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' host/kman_host/__init__.py)
+          echo "tag=$tag firmware=$fw python=$py kman_host=$host"
+          # One check per line: under 'bash -e' a failure inside an && list would not stop the step.
+          fail=0
+          [ "$tag" = "$fw" ]   || { echo "::error::firmware/include/config.h KMAN_FW_VERSION is '$fw', tag is '$tag'"; fail=1; }
+          [ "$tag" = "$py" ]   || { echo "::error::pyproject.toml version is '$py', tag is '$tag'"; fail=1; }
+          [ "$tag" = "$host" ] || { echo "::error::host/kman_host/__init__.py __version__ is '$host', tag is '$tag'"; fail=1; }
+          grep -q "^## \[$tag\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$tag]' section"; fail=1; }
+          exit $fail
+
+  build:
+    needs: check-version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          tag="${TAG#v}"
+          base="https://github.com/$GITHUB_REPOSITORY/blob/$TAG"
+          # CHANGELOG section for this tag; repo-relative .md links made absolute for the release page.
+          awk -v v="$tag" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md \
+            | sed -E "s#\]\((\./)?([^):]+\.md[^)]*)\)#](${base}/\2)#g" > notes.md
+          printf '\n---\nFlashing: see [docs/FIRMWARE_GUIDE.md](https://github.com/%s/blob/%s/docs/FIRMWARE_GUIDE.md).\n' \
+            "$GITHUB_REPOSITORY" "$TAG" >> notes.md
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: KMAN ${{ env.TAG }}
+          body_path: notes.md
+          files: |
+            dist/*.uf2
+            dist/*.hex
+          fail_on_unmatched_files: true
