@@ -82,6 +82,7 @@ uint16_t g_maxLatencyUs = 0;
 
 void initSensors() {
   hal::i2cBusRecover(KMAN_I2C_SDA_PIN, KMAN_I2C_SCL_PIN);
+  Wire.setPins(KMAN_I2C_SDA_PIN, KMAN_I2C_SCL_PIN);  // honour pin overrides from config.h
   Wire.begin();
   Wire.setClock(KMAN_I2C_HZ);
 
@@ -113,6 +114,7 @@ size_t buildHeaderFrame() {
   w.kv("board", KMAN_BOARD_NAME);
   w.kv("mcu", hal::mcuName());
   w.kv("device_id", devId);
+  w.kvHex("boot_id", hal::bootId(), 8);
   w.kv("stream_id", g_streamId);
   w.kv("t_us_at_header", hal::nowUs());
   w.kv("sample_rate_hz", (int32_t)KMAN_SAMPLE_RATE_HZ);

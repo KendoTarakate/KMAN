@@ -44,6 +44,7 @@ class StreamStats:
     seq_mismatch: int = 0
     bad_size: int = 0
     segments: int = 0
+    restarts_detected: int = 0  # clock restarts found in the data (no header announced them)
     headers: int = 0
     status_frames: int = 0
     log_messages: int = 0
@@ -141,16 +142,41 @@ class StreamDecoder:
             raise LayoutChanged(
                 f"channel layout changed: {self.header.channel_names} -> {hdr.channel_names}"
             )
-        if hdr.stream_id != self.header.stream_id or hdr.raw.get("device_id") != self.header.raw.get("device_id"):
-            # Device re-enumerated or rebooted: its clock restarted. Start a new segment
-            # and bridge the time axis with the host-measured gap.
+        restarted, why = self._new_stream(hdr)
+        if restarted:
             self.header = hdr
             self.headers.append(hdr.raw)
-            self.segment += 1
-            self.stats.segments += 1
-            self._last_t32 = None
-            self._seg_gap_host = max(0.0, host_time - self._last_host_time)
-            self.events.append(f"new stream (id {hdr.stream_id}): segment {self.segment}")
+            self._start_segment(host_time, f"new stream ({why})")
+
+    # A re-sent header (answer to 'H') is built while streaming, so its timestamp
+    # sits just after the last frame received; allow the TX-ring backlog (<3 s) plus margin.
+    HEADER_LEAD_MAX_US = 10_000_000
+    HEADER_LAG_MAX_US = 1_000_000
+    # A backwards step larger than this is a restarted device clock, not a duplicate.
+    BACKWARD_RESTART_US = 1_000_000
+
+    def _new_stream(self, hdr: P.SessionHeader) -> tuple[bool, str]:
+        """Does this header start a new device stream (re-open, re-enumeration or reboot)?"""
+        old = self.header.raw
+        for key in ("device_id", "boot_id", "stream_id"):
+            if hdr.raw.get(key) != old.get(key):
+                return True, f"{key} changed"
+        # Same ids (e.g. firmware without boot_id that rebooted and reused stream_id 1):
+        # a device clock far from the running stream means the device restarted.
+        t_hdr = hdr.raw.get("t_us_at_header")
+        if t_hdr is not None and self._last_t32 is not None:
+            ahead = (int(t_hdr) - self._last_t32) & 0xFFFFFFFF
+            if not (ahead <= self.HEADER_LEAD_MAX_US or ahead >= 0x100000000 - self.HEADER_LAG_MAX_US):
+                return True, "device clock restarted"
+        return False, ""
+
+    def _start_segment(self, host_time: float, why: str) -> None:
+        """Next DATA frame starts a new segment; its time axis is bridged with the host-measured gap."""
+        self.segment += 1
+        self.stats.segments += 1
+        self._last_t32 = None
+        self._seg_gap_host = max(0.0, host_time - self._last_host_time)
+        self.events.append(f"{why}: segment {self.segment}")
 
     def _on_data(self, body: bytes, host_time: float) -> None:
         if self.header is None:
@@ -173,6 +199,12 @@ class StreamDecoder:
                 seq64 = self.last_seq64 + nt
         else:
             dt = (t32 - self._last_t32) & 0xFFFFFFFF
+            if dt >= 0x80000000 and 0x100000000 - dt > self.BACKWARD_RESTART_US:
+                # Clock went backwards by more than a second: the device restarted and
+                # we missed (or it never sent) a header. Keep the data in a new segment.
+                self._start_segment(host_time, "device clock jumped back")
+                self.stats.restarts_detected += 1
+                return self._on_data(body, host_time)
             if dt == 0 or dt >= 0x80000000:
                 self.stats.duplicates += 1
                 return

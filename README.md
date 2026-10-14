@@ -1,5 +1,8 @@
 # KMAN — Silent Choking Detector, Step 1: Sensor Logger & Signal Analysis
 
+**Version 1.0.0** · [Changelog](CHANGELOG.md) · [Releases (firmware downloads)](https://github.com/KendoTarakate/KMAN/releases) ·
+[Firmware guide](docs/FIRMWARE_GUIDE.md) · [Code guide](docs/CODE_GUIDE.md)
+
 Bench prototype for acquiring clean breathing (chest IMU) and neck-tension
 (flex sensor) signals, recording labelled sessions, and analysing them offline.
 No detection logic, BLE or alerts yet.
@@ -9,14 +12,28 @@ firmware/   PlatformIO project (XIAO nRF52840, Arduino/Adafruit-Seeed core)
 host/       logger.py, live_view.py, to_csv.py, sim_device.py + kman_host package
 analysis/   report.py, config.yaml (all thresholds) + kman_analysis package
 data/       recordings (gitignored) + a small synthetic sample
-docs/       screenshots
+docs/       FIRMWARE_GUIDE.md, CODE_GUIDE.md, screenshots
 ```
 
 **Status.** Everything below was built and exercised end-to-end against the
-included device simulator (which speaks the exact firmware protocol), and the
-firmware compiles for the XIAO nRF52840 (all valid sensor configurations). It has
-**not yet run on real hardware**. The hardware test steps per stage are in
+included device simulator (which speaks the exact firmware protocol), and every
+firmware variant builds in CI. It has **not yet run on real hardware**. The
+hardware test steps per stage are in
 [Testing on hardware](#testing-on-hardware-stage-by-stage).
+
+## Quick start
+
+1. **Flash the board.** Download the `.uf2` for your sensor set from
+   [Releases](https://github.com/KendoTarakate/KMAN/releases), double-tap RESET on the XIAO,
+   and copy the file onto the drive that appears. Details, other methods and troubleshooting:
+   **[docs/FIRMWARE_GUIDE.md](docs/FIRMWARE_GUIDE.md)**.
+2. **Install the Python tools:** `pip install -r requirements.txt` (Python 3.11+).
+3. **Record:** `python host/logger.py --port <port> --out data/s01.parquet` and press 0–9 to label;
+   `python host/live_view.py` in a second terminal shows the signals live.
+4. **Analyse:** `python analysis/report.py data/s01.parquet` writes `reports/s01.png` and per-label tables.
+
+No board yet? `python host/live_view.py --sim` and
+`python analysis/report.py data/sample_synthetic.parquet` run on simulated data.
 
 ---
 
@@ -97,19 +114,21 @@ overridden with `build_flags` in `platformio.ini`.
 
 ## Setup
 
-**Firmware**
+**Firmware.** Full instructions are in [docs/FIRMWARE_GUIDE.md](docs/FIRMWARE_GUIDE.md):
+drag-and-drop `.uf2`, VS Code/PlatformIO, command line, SWD. With PlatformIO:
 ```bash
-cd firmware
-pio run -e xiao_nrf52840              # build (first run fetches the Seeed nRF52 platform from GitHub)
-pio run -e xiao_nrf52840 -t upload    # flash; if the port isn't found, double-tap RESET and retry
+pio run -d firmware -e xiao_nrf52840              # build; also writes .pio/build/<env>/kman-fw-<ver>-<env>.uf2
+pio run -d firmware -e xiao_nrf52840 -t upload    # flash; if the port isn't found, double-tap RESET and retry
 ```
+Environments: `xiao_nrf52840` (chest IMU + flex), `xiao_nrf52840_abdomen` (+ abdomen IMU),
+`xiao_nrf52840_neck` (+ neck IMU).
 
 **Python (3.11+)**
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .                                        # optional: makes kman_host/kman_analysis importable anywhere
-python -m pytest                                        # 28 tests, incl. decoding frames built by the firmware's C++ encoder
+python -m pytest                                        # includes decoding frames built by the firmware's C++ encoder
 ```
 Linux: add yourself to the serial group (`sudo usermod -aG dialout $USER`, then re-login).
 
@@ -156,7 +175,7 @@ a new `segment` starts.
 ## Testing on hardware (stage by stage)
 
 ### Stage 1: firmware streaming
-1. Wire the IMU and divider as above, flash, and keep the USB cable connected.
+1. Wire the IMU and divider as above, flash ([firmware guide](docs/FIRMWARE_GUIDE.md)), and keep the USB cable connected.
    Expect a **green blip every 2 s** (waiting for host). **Solid red** = sensor init failed.
 2. `python host/logger.py --list-ports` shows the board, e.g. `COM5` / `/dev/ttyACM0` / `/dev/cu.usbmodem…`.
 3. `python host/logger.py --port <port> --out data/bringup.parquet --duration 60`
@@ -248,8 +267,11 @@ with absolute floors for motion (`threshold_mg`) and breath prominence.
 3. **Thresholds are tuned on simulated data.** Expect to re-tune on the first real sessions.
 4. **±2 g can clip** during vigorous coughing or running. `report.py` prints `chest_accel_clipped_pct`.
 5. The firmware streams only while the host holds the port open (DTR). It is a logger, not yet a standalone device.
+6. **Re-plugging the cable reboots the board.** The recording continues in a new `segment`, and the
+   gap across the reboot is measured with the PC clock, so its length is accurate to a few frames.
 
 ## Troubleshooting
+* **Flashing problems:** see the troubleshooting table in [docs/FIRMWARE_GUIDE.md](docs/FIRMWARE_GUIDE.md#troubleshooting).
 * **No header / "data frames waiting":** wrong port, or old firmware. The logger re-requests every 2 s.
 * **`init_failed: no I2C ACK`:** SDA/SCL swapped, no pull-ups, SA0 high (→ 0x6B), or VIN not powered.
 * **`NO-XTAL` in the status line:** HF clock is on the RC oscillator, so timing is inaccurate. Report it; it shouldn't happen with USB connected.

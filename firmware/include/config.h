@@ -6,7 +6,7 @@
 #include <Arduino.h>
 
 #ifndef KMAN_FW_VERSION
-#define KMAN_FW_VERSION "0.1.0"
+#define KMAN_FW_VERSION "1.0.0"
 #endif
 
 #ifndef KMAN_BOARD_NAME

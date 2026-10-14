@@ -37,6 +37,8 @@ def main(argv=None) -> int:
     ap.add_argument("--end", type=float, help="zoom end (s)")
     ap.add_argument("--show", action="store_true", help="also open an interactive window")
     args = ap.parse_args(argv)
+    if (args.start is None) != (args.end is None):
+        ap.error("--start and --end must be given together")
 
     cfg = load_config(args.config)
     s = load_session(args.session)

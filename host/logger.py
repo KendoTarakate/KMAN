@@ -37,9 +37,10 @@ def default_out() -> Path:
 class Recorder:
     """Decoder + writer glue shared by live recording and replay."""
 
-    def __init__(self, out: Path, raw: bool, extra_meta: dict, udp_port: int | None):
+    def __init__(self, out: Path, raw: bool, extra_meta: dict, udp_port: int | None,
+                 label_events: list[dict] | None = None):
         self.dec = StreamDecoder()
-        self.writer = SessionWriter(out, raw=raw, extra_meta=extra_meta)
+        self.writer = SessionWriter(out, raw=raw, extra_meta=extra_meta, label_events=label_events)
         self.udp = UdpSender(udp_port) if udp_port else None
         self.last_header_raw: bytes | None = None
         self.notes: list[str] = []
@@ -74,6 +75,9 @@ class Recorder:
             self.announce_label()
 
     def close(self) -> dict:
+        if self.writer.header is None and self.dec.header is not None:
+            # feed() was interrupted (LayoutChanged) before it could hand the header over.
+            self.writer.set_header(self.dec.header)
         batch = self.dec.drain()
         if batch is not None and self.writer.header is not None:
             self.writer.write_batch(batch)
@@ -148,7 +152,8 @@ def run_live(args) -> int:
             while running:
                 try:
                     data = ser.read(max(1, ser.in_waiting))
-                except serial.SerialException as e:
+                except OSError as e:  # SerialException is an OSError; POSIX in_waiting raises a bare OSError
+
                     print(f"\n[serial error: {e}] reconnecting... (q to stop)", flush=True)
                     ser.close()
                     while running:
@@ -161,7 +166,7 @@ def run_live(args) -> int:
                             print("[reconnected]", flush=True)
                             rec.notes.append(f"reconnected at {time.time():.3f}")
                             break
-                        except serial.SerialException:
+                        except OSError:
                             pass
                     continue
                 if data:
@@ -176,7 +181,7 @@ def run_live(args) -> int:
                     header_asked = now
                     try:
                         ser.write(P.CMD_SEND_HEADER)
-                    except serial.SerialException:
+                    except OSError:
                         pass  # the read path handles the disconnect
                     print(f"\n[no session header yet; {rec.dec.parser.stats.frames} frames, "
                           f"{rec.dec.stats.frames_before_header} data frames waiting] requested again", flush=True)
@@ -234,11 +239,17 @@ def run_replay(args) -> int:
         return 2
     labels_path = Path(args.labels) if args.labels else sidecar_paths(src.with_suffix(".parquet"))[1]
     events = read_label_events(labels_path)
-    rec = Recorder(out, raw=False, extra_meta={"source": "replay", "replay_of": str(src)}, udp_port=None)
+    # The output's .labels.jsonl gets the same events. When --out has the source's stem
+    # this rewrites the very file just read, so recovering a session never loses its labels.
+    rec = Recorder(out, raw=False, extra_meta={"source": "replay", "replay_of": str(src)}, udp_port=None,
+                   label_events=events)
     rec.dec.schedule_labels(events)
     data = src.read_bytes()
-    for i in range(0, len(data), 1 << 16):
-        rec.feed(data[i : i + (1 << 16)], host_time=0.0)
+    try:
+        for i in range(0, len(data), 1 << 16):
+            rec.feed(data[i : i + (1 << 16)], host_time=0.0)
+    except LayoutChanged as e:
+        print(f"[{e}] -- replay stopped there; the output holds the data before the change.", file=sys.stderr)
     summary = rec.close()
     print(f"replayed {len(data)} bytes with {len(events)} label events from {labels_path}")
     print_summary(summary, out, rec.writer.rows_written)

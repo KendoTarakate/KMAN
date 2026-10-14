@@ -47,6 +47,7 @@ class SessionWriter:
         raw: bool = True,
         row_group_rows: int = 3000,
         extra_meta: dict | None = None,
+        label_events: list[dict] | None = None,
     ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,8 @@ class SessionWriter:
         self.labels_path = labels_path
         self._raw = open(raw_path, "wb") if raw else None
         self._labels = open(labels_path, "w", encoding="utf-8")
+        for ev in label_events or []:  # replay: carry the recorded events over
+            self.write_label_event(ev)
         self._writer: pq.ParquetWriter | None = None
         self._schema: pa.Schema | None = None
         self._pending: list[dict[str, np.ndarray]] = []

@@ -13,6 +13,7 @@ void init();  // clocks, LEDs, host link
 
 const char* mcuName();
 void deviceId(char* out, size_t cap);  // stable hex id of this chip
+uint32_t bootId();                     // random per boot: lets the host tell a reboot from a reconnect
 
 // ---- sample clock (hardware timer, 1 MHz timebase) ----
 // Starts a periodic tick. Must be called from the task that later calls waitForTick().

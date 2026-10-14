@@ -236,6 +236,7 @@ class DeviceStatus:
             "tx_high_water": self.tx_high_water,
             "hfxo": self.hfxo,
             "sensor_error": self.sensor_error,
+            "flags": self.flags,
         }
 
 

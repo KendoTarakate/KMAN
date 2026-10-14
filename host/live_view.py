@@ -144,8 +144,9 @@ class Ring:
     def extend(self, x: np.ndarray) -> None:
         x = np.asarray(x, dtype=float).reshape(len(x), -1)
         if len(x) >= self.n:
-            self.buf[:] = x[-self.n :]
             self.count += len(x)
+            # Keep the newest n rows with the oldest at count % n, where ordered() starts reading.
+            self.buf[:] = np.roll(x[-self.n :], self.count % self.n, axis=0)
             return
         start = self.count % self.n
         first = min(len(x), self.n - start)
@@ -275,7 +276,7 @@ def main(argv=None) -> int:
     ap.add_argument("--window", type=float, default=20.0, help="seconds shown")
     ap.add_argument("--hp", type=float, default=0.05, help="respiration high-pass corner (Hz)")
     ap.add_argument("--exit-after", type=float, default=0, help="quit after N seconds (testing)")
-    ap.add_argument("--screenshot", help="save a PNG of the window on exit")
+    ap.add_argument("--screenshot", help="save a PNG of the window when it closes")
     args = ap.parse_args(argv)
 
     import pyqtgraph as pg
@@ -293,7 +294,7 @@ def main(argv=None) -> int:
     pg.setConfigOptions(antialias=True, background=SURFACE, foreground=TEXT_2)
     app = pg.mkQApp("KMAN live view")
 
-    state = {"paused": False, "axes": False, "detrend": True, "proc": None, "built": False}
+    state = {"paused": False, "axes": False, "detrend": True, "proc": None, "error": None}
     dec = StreamDecoder()
 
     class Window(QtWidgets.QWidget):
@@ -311,6 +312,11 @@ def main(argv=None) -> int:
                 state["detrend"] = not state["detrend"]
             elif k in ("q", "\x1b") or ev.key() == QtCore.Qt.Key.Key_Escape:
                 self.close()
+
+        def closeEvent(self, ev):  # noqa: N802 (Qt naming)
+            if args.screenshot:  # however the window is closed
+                self.grab().save(args.screenshot)
+            super().closeEvent(ev)
 
     win = Window()
     win.setWindowTitle(f"KMAN live view - {source.name}")
@@ -392,12 +398,18 @@ def main(argv=None) -> int:
     rate_hist: list[tuple[float, int]] = []
 
     def tick() -> None:
+        if state["error"]:  # stay on the error until the viewer is restarted
+            return
         try:
             data = source.poll()
             if data:
                 dec.feed(data)
         except LayoutChanged as e:
-            label_lbl.setText(f"layout changed: {e}")
+            state["error"] = f"layout changed, restart the viewer: {e}"
+        except Exception as e:  # e.g. the serial port vanished in --port mode
+            state["error"] = f"source error, restart the viewer: {e}"
+        if state["error"]:
+            label_lbl.setText(state["error"])
             return
         if dec.header is not None and state["proc"] is None:
             state["proc"] = LiveProcessor(dec.header, args.window, args.hp)
@@ -454,12 +466,7 @@ def main(argv=None) -> int:
     timer.start(33)
 
     if args.exit_after:
-        def finish():
-            if args.screenshot:
-                win.grab().save(args.screenshot)
-            win.close()
-
-        QtCore.QTimer.singleShot(int(args.exit_after * 1000), finish)
+        QtCore.QTimer.singleShot(int(args.exit_after * 1000), win.close)
 
     app.exec()
     return 0

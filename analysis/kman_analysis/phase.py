@@ -50,6 +50,6 @@ def chest_abdomen_phase(t: np.ndarray, chest: np.ndarray, abd: np.ndarray, fs: f
     ma = np.median(ea[calib]) if calib.sum() > 10 else np.median(ea)
     amp_ok = (ec > c["min_amplitude_frac"] * mc) & (ea > c["min_amplitude_frac"] * ma)
     amp_ok = pd.Series(amp_ok.astype(float)).rolling(win, center=True, min_periods=1).mean().to_numpy() > 0.5
-    valid = amp_ok & (coh >= c["min_coherence"]) & (cnt >= 0.5 * win)
+    valid = ok & amp_ok & (coh >= c["min_coherence"]) & (cnt >= 0.5 * win)
     paradox = valid & (np.abs(phase) > c["paradox_deg"])
     return Phase(t=t, phase_deg=phase, coherence=coh, valid=valid, paradox=paradox, abd_flipped=flipped)

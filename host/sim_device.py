@@ -95,7 +95,7 @@ def run_pty(args, s: sim.SimSession) -> int:
             except (BlockingIOError, OSError):
                 cmd = b""
             if P.CMD_SEND_HEADER in cmd:
-                write_all(s.header_frame())
+                write_all(s.header_frame(i))
             write_all(fr)
             lab = int(s.labels[max(i, 0)])
             if lab != last_label:

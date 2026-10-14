@@ -184,11 +184,14 @@ def detect_breaths(t: np.ndarray, wave: np.ndarray, fs: float, invalid: np.ndarr
     amp = props["prominences"]
     valid = ~invalid[peaks] if len(peaks) else np.zeros(0, dtype=bool)
 
-    vt = bt[valid]
-    iv = np.diff(vt)
-    keep = iv <= cfg["breathing"]["max_rate_interval_s"]
-    rate_t = vt[1:][keep]
+    # Rate from consecutive *detected* breaths, keeping intervals whose both ends are
+    # valid. (Pairing consecutive valid breaths instead would bridge an invalid breath
+    # and report one double-length interval, i.e. half the true rate.)
+    iv = np.diff(bt)
+    keep = valid[1:] & valid[:-1] & (iv <= cfg["breathing"]["max_rate_interval_s"])
+    rate_t = bt[1:][keep]
     rate = 60.0 / iv[keep]
+    vt = bt[valid]
 
     tf = np.arange(n_full) / fs_full
     since = np.full(n_full, np.nan)

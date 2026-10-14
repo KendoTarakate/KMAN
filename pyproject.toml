@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kman"
-version = "0.1.0"
+version = "1.0.0"
 description = "Silent choking detector - Step 1: sensor logger and signal analysis"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,5 +26,5 @@ where = ["host", "analysis"]
 include = ["kman_host*", "kman_analysis*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["host", "analysis"]
+pythonpath = ["host", "analysis"]  # so tests can import the CLI scripts (logger, live_view, sim_device) too
 testpaths = ["host/tests", "analysis/tests"]

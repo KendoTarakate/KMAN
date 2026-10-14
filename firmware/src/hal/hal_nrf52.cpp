@@ -24,6 +24,7 @@ volatile uint32_t s_tickCount = 0;
 volatile uint32_t s_tickTimeUs = 0;
 uint32_t s_periodUs = 10000;
 TaskHandle_t s_loopTask = nullptr;
+uint32_t s_bootId = 0;
 
 void startHfxo() {
   // The SoftDevice is never enabled in this firmware, so CLOCK may be driven
@@ -34,6 +35,23 @@ void startHfxo() {
   NRF_CLOCK->TASKS_HFCLKSTART = 1;
   for (uint32_t guard = 0; !NRF_CLOCK->EVENTS_HFCLKSTARTED && guard < 1000000; ++guard) {
   }
+}
+
+uint32_t randomWord() {
+  // Hardware RNG (thermal noise) with bias correction; the SoftDevice is never
+  // enabled, so the peripheral may be used directly. ~4 bytes x ~120 us.
+  NRF_RNG->CONFIG = RNG_CONFIG_DERCEN_Enabled << RNG_CONFIG_DERCEN_Pos;
+  NRF_RNG->EVENTS_VALRDY = 0;
+  NRF_RNG->TASKS_START = 1;
+  uint32_t v = 0;
+  for (int i = 0; i < 4; ++i) {
+    for (uint32_t guard = 0; !NRF_RNG->EVENTS_VALRDY && guard < 100000; ++guard) {
+    }
+    NRF_RNG->EVENTS_VALRDY = 0;
+    v = (v << 8) | (NRF_RNG->VALUE & 0xFF);
+  }
+  NRF_RNG->TASKS_STOP = 1;
+  return v;
 }
 
 }  // namespace
@@ -71,8 +89,11 @@ namespace hal {
 
 void init() {
   startHfxo();
+  s_bootId = randomWord();
   Serial.begin(115200);  // baud is irrelevant for USB CDC
 }
+
+uint32_t bootId() { return s_bootId; }
 
 const char* mcuName() { return "nRF52840"; }
 

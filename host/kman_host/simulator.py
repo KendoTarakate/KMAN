@@ -76,8 +76,10 @@ class SimSession:
     def period_us(self) -> int:
         return 1_000_000 // self.cfg.fs
 
-    def header_frame(self) -> bytes:
-        return P.encode_frame(P.TYPE_HEADER, json.dumps(self.header).encode())
+    def header_frame(self, i: int = -1) -> bytes:
+        """Header as the firmware sends it at sample index i (its timestamp is the current device time)."""
+        hdr = dict(self.header, t_us_at_header=(self.cfg.t0_us + max(i, 0) * self.period_us) & 0xFFFFFFFF)
+        return P.encode_frame(P.TYPE_HEADER, json.dumps(hdr).encode())
 
     def data_frame(self, i: int) -> bytes:
         t32 = (self.cfg.t0_us + i * self.period_us) & 0xFFFFFFFF
@@ -121,7 +123,9 @@ def _smooth(x: np.ndarray, n: int) -> np.ndarray:
     if n <= 1:
         return x
     k = np.ones(n) / n
-    pad = np.pad(x, (n // 2, n - 1 - n // 2), mode="edge")
+    # Reflect, not edge: edge padding would repeat one noise sample n/2 times and
+    # make smoothed noise swing far more near the ends than in the interior.
+    pad = np.pad(x, (n // 2, n - 1 - n // 2), mode="reflect" if len(x) > n else "edge")
     return np.convolve(pad, k, mode="valid")
 
 
@@ -377,7 +381,8 @@ def build_header(cfg: SimConfig, stream_id: int = 1) -> dict:
     present = sum(1 << x["bit"] for x in sensors if x["status"] == "ok")
     return {
         "type": "kman_session_header", "protocol": 1, "fw_version": "sim", "build": "simulator",
-        "board": "simulator", "mcu": "none", "device_id": "SIMULATOR0000000", "stream_id": stream_id,
+        "board": "simulator", "mcu": "none", "device_id": "SIMULATOR0000000", "boot_id": "0x00000001",
+        "stream_id": stream_id,
         "t_us_at_header": cfg.t0_us, "sample_rate_hz": cfg.fs, "period_us": 1_000_000 // cfg.fs,
         "clock": {"source": "simulated", "hfclk": "simulated", "t_unit": "us", "t_bits": 32, "seq_bits": 16},
         "frame": {"sync": "AA55", "len": "u16le, bytes of type+body",
