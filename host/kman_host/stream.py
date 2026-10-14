@@ -61,6 +61,10 @@ class LabelEvent:
     host_time: float
     label: int
     name: str
+    # Position independent of how segment gaps were bridged (host clock live, none in
+    # replay): segment number and tick offset from that segment's first frame.
+    segment: int | None = None
+    seg_seq: int | None = None
 
 
 @dataclass
@@ -87,6 +91,7 @@ class StreamDecoder:
         self.segment = -1
         self._last_t32: int | None = None
         self._last_seq16 = 0
+        self._seg_first_seq64 = 0  # seq64 of the current segment's first frame
         self.last_t64: int | None = None
         self.last_seq64: int | None = None
         self._last_host_time = 0.0
@@ -158,6 +163,8 @@ class StreamDecoder:
     def _new_stream(self, hdr: P.SessionHeader) -> tuple[bool, str]:
         """Does this header start a new device stream (re-open, re-enumeration or reboot)?"""
         old = self.header.raw
+        if hdr.raw == old:  # byte-for-byte repeat, e.g. the logger re-announcing it to a viewer
+            return False, ""
         for key in ("device_id", "boot_id", "stream_id"):
             if hdr.raw.get(key) != old.get(key):
                 return True, f"{key} changed"
@@ -213,6 +220,13 @@ class StreamDecoder:
                 self.stats.duplicates += 1
                 return
             if ((seq16 - self._last_seq16) & 0xFFFF) != (nt & 0xFFFF):
+                if dt > self.BACKWARD_RESTART_US:
+                    # t_us and seq come from one tick counter, so a real gap always agrees
+                    # modulo 2^16. A long jump that disagrees is a restarted device clock
+                    # that happens to look like a forward step (old uptime > 35.8 min).
+                    self._start_segment(host_time, "device clock jumped (seq disagrees)")
+                    self.stats.restarts_detected += 1
+                    return self._on_data(body, host_time)
                 self.stats.seq_mismatch += 1
             if nt > 1:
                 missing = nt - 1
@@ -224,6 +238,8 @@ class StreamDecoder:
             t64 = self.last_t64 + dt
             seq64 = self.last_seq64 + nt
 
+        if self._last_t32 is None:  # first frame of the session or of a new segment
+            self._seg_first_seq64 = seq64
         self._apply_pending_labels(seq64)
         self._last_t32, self._last_seq16 = t32, seq16
         self.last_t64, self.last_seq64 = t64, seq64
@@ -242,20 +258,35 @@ class StreamDecoder:
         nxt_t = None
         if self.last_t64 is not None and self.header is not None:
             nxt_t = self.last_t64 + self.header.period_us
-        ev = LabelEvent(nxt_seq, nxt_t, host_time, int(code), label_name(code))
+        seg_seq = 0 if self._last_t32 is None else nxt_seq - self._seg_first_seq64
+        ev = LabelEvent(nxt_seq, nxt_t, host_time, int(code), label_name(code), max(self.segment, 0), seg_seq)
         self.label = int(code)
         self.label_events.append(ev)
         return ev
 
     def schedule_labels(self, events: list[dict]) -> None:
-        """Replay: apply recorded label events when their seq is reached."""
+        """Replay: apply recorded label events at the frame they were pressed before.
+
+        Events carrying (segment, seg_seq) are placed by segment and offset within it,
+        which does not depend on how a reconnect gap was bridged. Older events (seq only)
+        are placed by seq, as before 1.0.
+        """
         evs = [LabelEvent(e.get("seq"), e.get("t_us"), e.get("host_time", 0.0), int(e["label"]),
-                          e.get("name", label_name(e["label"]))) for e in events]
-        evs.sort(key=lambda e: -1 if e.seq is None else e.seq)
+                          e.get("name", label_name(e["label"])), e.get("segment"), e.get("seg_seq"))
+               for e in events]
+        if evs and all(e.segment is not None and e.seg_seq is not None for e in evs):
+            evs.sort(key=lambda e: (e.segment, e.seg_seq))
+        else:
+            evs.sort(key=lambda e: -1 if e.seq is None else e.seq)
         self._pending_labels = evs
 
+    def _label_due(self, ev: LabelEvent, seq64: int) -> bool:
+        if ev.segment is not None and ev.seg_seq is not None:
+            return (ev.segment, ev.seg_seq) <= (max(self.segment, 0), seq64 - self._seg_first_seq64)
+        return ev.seq is None or ev.seq <= seq64
+
     def _apply_pending_labels(self, seq64: int) -> None:
-        while self._pending_labels and (self._pending_labels[0].seq is None or self._pending_labels[0].seq <= seq64):
+        while self._pending_labels and self._label_due(self._pending_labels[0], seq64):
             ev = self._pending_labels.pop(0)
             self.label = ev.label
             self.label_events.append(ev)

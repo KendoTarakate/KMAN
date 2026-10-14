@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import sys
 import time
 from dataclasses import asdict
@@ -52,7 +53,11 @@ class Recorder:
             self.udp.send(b"".join(f.raw for f in frames))
         for f in frames:
             if f.type == P.TYPE_HEADER:
-                self.last_header_raw = f.raw
+                # Re-announced to viewers every 2 s. Drop the device timestamp: it goes
+                # stale, and the viewer's decoder would read it as a clock restart.
+                hdr = json.loads(f.body)
+                hdr.pop("t_us_at_header", None)
+                self.last_header_raw = P.encode_frame(P.TYPE_HEADER, json.dumps(hdr).encode())
         if self.dec.new_header:
             self.writer.set_header(self.dec.header)
             self.dec.new_header = False
@@ -139,6 +144,25 @@ def run_live(args) -> int:
         ser.write(P.CMD_SEND_HEADER)
         return ser
 
+    def handle_inputs(keys) -> bool:
+        """Keys and viewer label commands; returns False when the user asked to quit."""
+        go = True
+        for k in keys.poll():
+            if k.isdigit():
+                rec.set_label(int(k))
+                print(f"\n[label -> {k} {label_name(int(k))}]", flush=True)
+            elif k in ("q", "Q"):
+                go = False
+            elif k == "?":
+                print("\n" + help_text(), flush=True)
+        if ctl:
+            for msg in ctl.poll():
+                code = parse_label_command(msg)
+                if code is not None and code in LABELS:
+                    rec.set_label(code)
+                    print(f"\n[label (viewer) -> {code} {label_name(code)}]", flush=True)
+        return go
+
     print(f"Recording to {out}\nLabels: {help_text()}\nKeys: 0-9 label, q quit, ? help", flush=True)
     ser = open_port()
     t_start = time.time()
@@ -156,11 +180,16 @@ def run_live(args) -> int:
 
                     print(f"\n[serial error: {e}] reconnecting... (q to stop)", flush=True)
                     ser.close()
+                    next_try = time.time() + 1.0
                     while running:
-                        if "q" in keys.poll():
+                        # Labels pressed now apply from the first frame after the reconnect.
+                        running = handle_inputs(keys)
+                        if args.duration and time.time() - t_start >= args.duration:
                             running = False
-                            break
-                        time.sleep(1.0)
+                        if not running or time.time() < next_try:
+                            time.sleep(0.05)
+                            continue
+                        next_try = time.time() + 1.0
                         try:
                             ser = open_port()
                             print("[reconnected]", flush=True)
@@ -186,20 +215,8 @@ def run_live(args) -> int:
                     print(f"\n[no session header yet; {rec.dec.parser.stats.frames} frames, "
                           f"{rec.dec.stats.frames_before_header} data frames waiting] requested again", flush=True)
 
-                for k in keys.poll():
-                    if k.isdigit():
-                        rec.set_label(int(k))
-                        print(f"\n[label -> {k} {label_name(int(k))}]", flush=True)
-                    elif k in ("q", "Q"):
-                        running = False
-                    elif k == "?":
-                        print("\n" + help_text(), flush=True)
-                if ctl:
-                    for msg in ctl.poll():
-                        code = parse_label_command(msg)
-                        if code is not None and code in LABELS:
-                            rec.set_label(code)
-                            print(f"\n[label (viewer) -> {code} {label_name(code)}]", flush=True)
+                if not handle_inputs(keys):
+                    running = False
 
                 while rec.dec.events:
                     print("\n[" + rec.dec.events.popleft() + "]", flush=True)

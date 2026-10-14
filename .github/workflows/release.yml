@@ -19,9 +19,15 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           fw=$(sed -n 's/^#define KMAN_FW_VERSION "\(.*\)"/\1/p' firmware/include/config.h)
           py=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
-          echo "tag=$tag firmware=$fw python=$py"
-          test "$tag" = "$fw" && test "$tag" = "$py"
-          grep -q "^## \[$tag\]" CHANGELOG.md
+          host=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' host/kman_host/__init__.py)
+          echo "tag=$tag firmware=$fw python=$py kman_host=$host"
+          # One check per line: under 'bash -e' a failure inside an && list would not stop the step.
+          fail=0
+          [ "$tag" = "$fw" ]   || { echo "::error::firmware/include/config.h KMAN_FW_VERSION is '$fw', tag is '$tag'"; fail=1; }
+          [ "$tag" = "$py" ]   || { echo "::error::pyproject.toml version is '$py', tag is '$tag'"; fail=1; }
+          [ "$tag" = "$host" ] || { echo "::error::host/kman_host/__init__.py __version__ is '$host', tag is '$tag'"; fail=1; }
+          grep -q "^## \[$tag\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$tag]' section"; fail=1; }
+          exit $fail
 
   build:
     needs: check-version
@@ -40,7 +46,10 @@ jobs:
       - name: Release notes from CHANGELOG.md
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          awk -v v="$tag" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          base="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME"
+          # CHANGELOG section for this tag; repo-relative .md links made absolute for the release page.
+          awk -v v="$tag" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md \
+            | sed -E "s#\]\((\./)?([^):]+\.md[^)]*)\)#](${base}/\2)#g" > notes.md
           printf '\n---\nFlashing: see [docs/FIRMWARE_GUIDE.md](https://github.com/%s/blob/%s/docs/FIRMWARE_GUIDE.md).\n' \
             "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
           ls -la dist

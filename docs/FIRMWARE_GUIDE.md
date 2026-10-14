@@ -20,11 +20,13 @@ Each variant is the same firmware, built for a different set of wired sensors. A
 for a variant but not connected is reported as failed (solid red LED) while the rest keep
 streaming, so pick the one that matches your wiring.
 
-| Variant (file name contains) | Chest IMU 0x6A | Neck flex (A0) | Abdomen IMU 0x6B | Neck IMU 0x6B |
+| Image file (version 1.0.0) | Chest IMU 0x6A | Neck flex (A0) | Abdomen IMU 0x6B | Neck IMU 0x6B |
 |---|:-:|:-:|:-:|:-:|
-| `xiao_nrf52840` (bench default) | ✓ | ✓ | | |
-| `xiao_nrf52840_abdomen` | ✓ | ✓ | ✓ | |
-| `xiao_nrf52840_neck` | ✓ | ✓ | | ✓ |
+| `kman-fw-1.0.0-xiao_nrf52840.uf2` (bench default) | ✓ | ✓ | | |
+| `kman-fw-1.0.0-xiao_nrf52840_abdomen.uf2` | ✓ | ✓ | ✓ | |
+| `kman-fw-1.0.0-xiao_nrf52840_neck.uf2` | ✓ | ✓ | | ✓ |
+
+The part after the version is the variant name, which is also the PlatformIO environment name.
 
 Wiring is in the [README](../README.md#hardware--wiring-bench-prototype). The second IMU uses
 address 0x6B: tie its SA0/SDO pin to 3V3.
@@ -58,13 +60,15 @@ The XIAO's bootloader shows up as a USB drive. Copying a `.uf2` file onto that d
 
 ## Method 2: VS Code + PlatformIO
 
-1. Install [Visual Studio Code](https://code.visualstudio.com/), then in VS Code open
-   **Extensions** (Ctrl/Cmd+Shift+X), search **PlatformIO IDE** and install it. Restart VS Code when asked.
+1. Install [Visual Studio Code](https://code.visualstudio.com/) and [Git](https://git-scm.com/downloads).
+   PlatformIO uses Git to download the pinned nRF52 board support, even if you got the code as a ZIP.
+   Then in VS Code open **Extensions** (Ctrl/Cmd+Shift+X), search **PlatformIO IDE** and install it.
+   Restart VS Code when asked.
 2. Get the code: `git clone https://github.com/KendoTarakate/KMAN.git`, or *Code → Download ZIP*
    on GitHub and unzip it.
-3. **File → Open Folder…** and choose the **`KMAN/firmware`** folder (the one that contains
-   `platformio.ini`). Opening the repository root is fine too if you then pick the project in the
-   PlatformIO sidebar.
+3. **File → Open Folder…** and choose the **`KMAN/firmware`** folder itself, the one that contains
+   `platformio.ini`. PlatformIO only finds a project at the top of an opened folder. If you opened
+   the repository root, use **File → Add Folder to Workspace… → firmware**.
 4. Click the PlatformIO (ant) icon in the left bar. Under **Project Tasks**, expand the variant you need
    (e.g. `xiao_nrf52840`) and click **Build**. The first build downloads the toolchain and board
    support (a few hundred MB) and takes a few minutes; later builds take seconds.
@@ -84,6 +88,9 @@ garbage there. Use `host/logger.py` or `host/live_view.py`.
 
 ## Method 3: PlatformIO command line
 
+Needs Python 3 and [Git](https://git-scm.com/downloads) (PlatformIO fetches the pinned nRF52
+board support with Git).
+
 ```bash
 python -m pip install platformio
 cd KMAN
@@ -92,7 +99,8 @@ pio run -d firmware -e xiao_nrf52840 -t upload       # build + flash
 pio run -d firmware -e xiao_nrf52840 -t upload --upload-port COM5    # if several boards are connected
 pio device list                                      # find the port
 ```
-Build every variant at once with `pio run -d firmware`.
+Without `-e`, PlatformIO uses the default environment (`xiao_nrf52840`). Build all three variants with
+`pio run -d firmware -e xiao_nrf52840 -e xiao_nrf52840_abdomen -e xiao_nrf52840_neck`.
 
 ---
 
@@ -139,8 +147,11 @@ build_flags =
     -DKMAN_BOARD_NAME=\"xiao_nrf52840\"
     -DKMAN_SAMPLE_RATE_HZ=200            ; must divide 1,000,000; max 416
     -DKMAN_FLEX_R_FIXED_OHM=33000        ; metadata only: recorded in each session header
-    -DKMAN_FLEX_SENSOR_DESC=\"Spectra Symbol 2.2in\"
+    '-DKMAN_FLEX_SENSOR_DESC="Spectra Symbol 2.2in"'
 ```
+
+A text value that contains spaces needs the whole flag in single quotes, as in the last line.
+Without them PlatformIO splits it at the spaces and the build fails.
 
 Every option, with what it does, is listed in `config.h` and in
 [CODE_GUIDE.md §5](CODE_GUIDE.md#5-firmware-main-loop-config-build). Invalid combinations
@@ -161,6 +172,7 @@ stay identifiable.
 | No drive appears after double-tapping RESET | Use a data cable; tap faster; try another port; avoid hubs. |
 | Copy "fails" or "Disk not ejected" message at the end | Expected, because the board restarts once flashed. Check the LED. |
 | Upload in PlatformIO can't find the port | Double-tap RESET, then Upload again. Close the logger, live view and serial monitor. |
+| `Please install Git client` on the first PlatformIO build | Install [Git](https://git-scm.com/downloads), restart VS Code / the terminal, build again. |
 | Linux: permission denied on `/dev/ttyACM0` | `sudo usermod -aG dialout $USER` then log out and back in; for PlatformIO uploads also install its [udev rules](https://docs.platformio.org/en/latest/core/installation/udev-rules.html). |
 | Green LED never blips after flashing | Double-tap RESET and flash again. Make sure the file is a `kman-fw-…uf2` for the nRF52840. |
 | Solid red LED | A configured sensor isn't answering. Run the logger: the header names it and gives the reason. Wrong variant? Re-flash the right one. |

@@ -324,6 +324,7 @@ def main(argv=None) -> int:
     vbox = QtWidgets.QVBoxLayout(win)
     top = QtWidgets.QHBoxLayout()
     label_lbl = QtWidgets.QLabel("waiting for session header...")
+    label_lbl.setWordWrap(True)  # long error messages must not widen the window
     f = QtGui.QFont()
     f.setPointSize(20)
     f.setBold(True)
@@ -409,7 +410,7 @@ def main(argv=None) -> int:
         except Exception as e:  # e.g. the serial port vanished in --port mode
             state["error"] = f"source error, restart the viewer: {e}"
         if state["error"]:
-            label_lbl.setText(state["error"])
+            label_lbl.setText(state["error"][:300])
             return
         if dec.header is not None and state["proc"] is None:
             state["proc"] = LiveProcessor(dec.header, args.window, args.hp)
