@@ -1,0 +1,54 @@
+# Push a tag like v1.0.0 to publish a GitHub Release with the firmware images
+# (one .uf2 + .hex per sensor variant) and the CHANGELOG section as notes.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches firmware and package versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          fw=$(sed -n 's/^#define KMAN_FW_VERSION "\(.*\)"/\1/p' firmware/include/config.h)
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          echo "tag=$tag firmware=$fw python=$py"
+          test "$tag" = "$fw" && test "$tag" = "$py"
+          grep -q "^## \[$tag\]" CHANGELOG.md
+
+  build:
+    needs: check-version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          awk -v v="$tag" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          printf '\n---\nFlashing: see [docs/FIRMWARE_GUIDE.md](https://github.com/%s/blob/%s/docs/FIRMWARE_GUIDE.md).\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: KMAN ${{ github.ref_name }}
+          body_path: notes.md
+          files: |
+            dist/*.uf2
+            dist/*.hex
+          fail_on_unmatched_files: true
