@@ -1,13 +1,23 @@
-# Push a tag like v1.0.0 to publish a GitHub Release with the firmware images
-# (one .uf2 + .hex per sensor variant) and the CHANGELOG section as notes.
+# Publish a GitHub Release with the firmware images (one .uf2 + .hex per sensor
+# variant) and the CHANGELOG section as notes. Either push a tag like v1.0.0, or
+# run this workflow from the Actions tab with a version: it then creates the tag
+# on the selected branch's latest commit.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 (creates tag v<version>)"
+        required: true
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
 
 jobs:
   check-version:
@@ -16,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Tag matches firmware and package versions
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           fw=$(sed -n 's/^#define KMAN_FW_VERSION "\(.*\)"/\1/p' firmware/include/config.h)
           py=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
           host=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' host/kman_host/__init__.py)
@@ -45,17 +55,19 @@ jobs:
           merge-multiple: true
       - name: Release notes from CHANGELOG.md
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          base="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME"
+          tag="${TAG#v}"
+          base="https://github.com/$GITHUB_REPOSITORY/blob/$TAG"
           # CHANGELOG section for this tag; repo-relative .md links made absolute for the release page.
           awk -v v="$tag" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md \
             | sed -E "s#\]\((\./)?([^):]+\.md[^)]*)\)#](${base}/\2)#g" > notes.md
           printf '\n---\nFlashing: see [docs/FIRMWARE_GUIDE.md](https://github.com/%s/blob/%s/docs/FIRMWARE_GUIDE.md).\n' \
-            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
+            "$GITHUB_REPOSITORY" "$TAG" >> notes.md
           ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
-          name: KMAN ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: KMAN ${{ env.TAG }}
           body_path: notes.md
           files: |
             dist/*.uf2

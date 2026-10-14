@@ -270,6 +270,14 @@ with absolute floors for motion (`threshold_mg`) and breath prominence.
 6. **Re-plugging the cable reboots the board.** The recording continues in a new `segment`, and the
    gap across the reboot is measured with the PC clock, so its length is accurate to a few frames.
 
+## Releasing a new version
+1. Set the same version in `firmware/include/config.h` (`KMAN_FW_VERSION`), `pyproject.toml` and
+   `host/kman_host/__init__.py`, and add a `## [x.y.z]` section to `CHANGELOG.md`.
+2. Merge to `main`, then either push a tag `vx.y.z`, or run **Actions → Release → Run workflow**
+   with the version.
+3. The workflow checks the versions match, runs the tests, builds every firmware variant, and
+   publishes a GitHub Release with the `.uf2`/`.hex` images and the changelog section.
+
 ## Troubleshooting
 * **Flashing problems:** see the troubleshooting table in [docs/FIRMWARE_GUIDE.md](docs/FIRMWARE_GUIDE.md#troubleshooting).
 * **No header / "data frames waiting":** wrong port, or old firmware. The logger re-requests every 2 s.
